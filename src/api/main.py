@@ -8,8 +8,8 @@ from pathlib import Path
 
 from ..core.config import settings
 from ..core.document_processor import DocumentProcessor
-from ..core.vector_store import VectorStoreManager
-from ..core.rag_engine import RAGEngine
+from ..core.chroma_vector_store import VectorStoreManager
+from ..core.rag_engine_fixed import RAGEngine
 from ..core.mock_test_engine import MockTestEngine
 from ..models.schemas import (
     QueryRequest, QueryResponse, DocumentUploadResponse, 

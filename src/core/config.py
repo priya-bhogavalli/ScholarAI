@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     
     # Database
     database_url: str
+    collection_name: str = "placement_papers"
     
     # Document Processing
     chunk_size: int = 1000
@@ -23,10 +24,14 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
     
+    # Environment
+    environment: str = "development"
+    debug: bool = True
+    
     # Logging
     log_level: str = "INFO"
     
     class Config:
-        env_file = "config/.env"
+        env_file = ".env"
 
 settings = Settings()

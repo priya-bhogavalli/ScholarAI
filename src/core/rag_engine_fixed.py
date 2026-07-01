@@ -4,20 +4,13 @@ except ImportError:
     from langchain.chat_models import ChatOpenAI
 
 try:
-    from langchain.chains import RetrievalQA
-except ImportError:
-    try:
-        from langchain_community.chains import RetrievalQA
-    except ImportError:
-        from langchain.chains.retrieval_qa.base import RetrievalQA
-
-try:
     from langchain.prompts import PromptTemplate
 except ImportError:
     from langchain_core.prompts import PromptTemplate
+
 from typing import Dict, List, Optional
 import json
-from .vector_store import VectorStoreManager
+from .chroma_vector_store import VectorStoreManager
 
 class RAGEngine:
     def __init__(self, vector_store_manager: VectorStoreManager, openai_api_key: str, model_name: str = "gpt-3.5-turbo"):
@@ -47,27 +40,16 @@ Instructions:
 
 Answer:"""
         )
-        
-        # Initialize retrieval chain only if vector store exists
-        if self.vector_store_manager.vector_store is not None:
-            self.qa_chain = RetrievalQA.from_chain_type(
-                llm=self.llm,
-                chain_type="stuff",
-                retriever=self.vector_store_manager.vector_store.as_retriever(
-                    search_kwargs={"k": 5}
-                ),
-                chain_type_kwargs={"prompt": self.prompt_template},
-                return_source_documents=True
-            )
-        else:
-            self.qa_chain = None
-    
-    def query_with_docs(self, question: str, docs: List) -> Dict:
-        """Query with pre-filtered documents"""
+
+    def query(self, question: str, max_docs: int = 5) -> Dict:
+        """Process a query and return response with sources"""
         try:
+            # Get relevant documents
+            docs = self.vector_store_manager.similarity_search(question, k=max_docs)
+            
             if not docs:
                 return {
-                    "answer": "I couldn't find any relevant information in the specified documents for your question.",
+                    "answer": "I couldn't find any relevant information for your question. Please try rephrasing or ask about topics covered in the uploaded materials.",
                     "sources": [],
                     "confidence": "low",
                     "total_sources_found": 0
@@ -78,9 +60,9 @@ Answer:"""
             
             # Generate response
             prompt = self.prompt_template.format(context=context, question=question)
-            response = self.llm.predict(prompt)
+            response = self.llm.invoke(prompt).content
             
-            # Format response with enhanced traceability
+            # Format response with sources
             result = {
                 "answer": response,
                 "sources": [],
@@ -88,7 +70,7 @@ Answer:"""
                 "total_sources_found": len(docs)
             }
             
-            # Add detailed source information
+            # Add source information
             for doc in docs:
                 source_info = {
                     "file_name": doc.metadata.get("file_name", "Unknown"),
@@ -107,40 +89,41 @@ Answer:"""
             
         except Exception as e:
             return {
-                "answer": f"I apologize, but I encountered an error: {str(e)}",
+                "answer": f"I encountered an error while processing your question: {str(e)}",
                 "sources": [],
                 "confidence": "low",
                 "total_sources_found": 0,
                 "error": str(e)
             }
 
-    def query(self, question: str, max_docs: int = 5) -> Dict:
-        """Process a query and return response with sources"""
+    def query_with_docs(self, question: str, docs: List) -> Dict:
+        """Query with pre-filtered documents"""
         try:
-            if self.qa_chain is None:
+            if not docs:
                 return {
-                    "answer": "No documents have been uploaded yet. Please upload some documents first.",
+                    "answer": "I couldn't find any relevant information in the specified documents for your question.",
                     "sources": [],
                     "confidence": "low",
                     "total_sources_found": 0
                 }
             
-            # Update retriever with max_docs
-            self.qa_chain.retriever.search_kwargs = {"k": max_docs}
+            # Create context from documents
+            context = "\n\n".join([doc.page_content for doc in docs])
             
-            # Get response
-            result = self.qa_chain({"query": question})
+            # Generate response
+            prompt = self.prompt_template.format(context=context, question=question)
+            response = self.llm.invoke(prompt).content
             
-            # Enhanced response with better traceability
-            response = {
-                "answer": result["result"],
+            # Format response
+            result = {
+                "answer": response,
                 "sources": [],
-                "confidence": "high" if len(result["source_documents"]) >= 3 else "medium",
-                "total_sources_found": len(result["source_documents"])
+                "confidence": "high" if len(docs) >= 3 else "medium",
+                "total_sources_found": len(docs)
             }
             
-            # Add detailed source information with metadata
-            for doc in result["source_documents"]:
+            # Add source information
+            for doc in docs:
                 source_info = {
                     "file_name": doc.metadata.get("file_name", "Unknown"),
                     "source": doc.metadata.get("source", "Unknown"),
@@ -152,13 +135,13 @@ Answer:"""
                     "difficulty": doc.metadata.get("difficulty"),
                     "year": doc.metadata.get("year")
                 }
-                response["sources"].append(source_info)
+                result["sources"].append(source_info)
             
-            return response
+            return result
             
         except Exception as e:
             return {
-                "answer": f"I apologize, but I encountered an error while processing your question: {str(e)}",
+                "answer": f"I encountered an error: {str(e)}",
                 "sources": [],
                 "confidence": "low",
                 "total_sources_found": 0,
@@ -179,10 +162,3 @@ Answer:"""
             relevant_docs.append(doc_info)
         
         return relevant_docs
-    
-    def update_retriever_config(self, k: int = 5, score_threshold: float = 0.7):
-        """Update retriever configuration"""
-        self.qa_chain.retriever.search_kwargs = {
-            "k": k,
-            "score_threshold": score_threshold
-        }
